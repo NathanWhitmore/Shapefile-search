@@ -1,0 +1,242 @@
+---
+title: "Shapefile search"
+runtime: shiny
+output:
+  flexdashboard::flex_dashboard:
+    navbar:
+      - { title: "reproducible.co.nz", href: "https://reproducible.co.nz", align: right }
+    orientation: rows
+    vertical_layout: fill
+    theme: spacelab
+    source_code: embed 
+---
+<style>
+
+body {
+  padding-top: 70px;
+}
+
+
+.navbar-brand {
+font-family: "Candara";
+  font-weight: bold;
+  font-size: 24px;
+}
+
+
+</style>
+
+
+
+Column {.sidebar}
+-----------------------------------------------------------------------
+
+**Enter your drive letter (capitals)**
+
+```{r}
+textInput("drive", label = "LETTER name of drive",
+          value = ""
+
+)
+
+
+```
+
+```{r}
+# add submit button
+actionButton("submit", label = "Activate")
+```
+
+<br/>
+
+```{r}
+library(fs)
+library(tidyverse)
+library(sf)
+library(leaflet)
+library(DT)
+
+drive <- reactive({
+  
+   paste0(as.character(input$drive), ":/")
+
+  
+})
+
+renderUI({
+  
+  paste("You are going to search drive:", drive())
+  
+})
+```
+
+
+<br/>
+
+
+**Your search terms**
+
+```{r}
+
+textInput("match", label = "Matching word or sequence",
+          value = ""
+
+)
+```
+
+
+<br/>
+
+**Render map **
+
+```{r}
+renderUI({
+  
+  selectInput("map", label = "Select potential match # to check",
+          choices = 1:nrow(df()), selected = 1)
+
+  
+})
+
+```
+
+
+Row {.tabset .tabset-fade}
+-------------------------------------
+
+### list of shapefiles
+
+```{r}
+
+all <- eventReactive(input$submit,
+                     {
+  
+    fs::dir_ls(path = c(drive()), 
+             type = "file", 
+             glob = "*shp", recurse = TRUE, fail = FALSE)
+})
+
+renderPrint({
+  
+  all()
+  
+})
+
+```
+
+### potential matches
+
+```{r}
+
+df <- reactive({
+  
+  got.string <- grepl(input$match, all(), ignore.case=TRUE)
+  
+  df <- data.frame(file = all(), contains = got.string)
+  rownames(df) <- 1: nrow(df)
+  df <- df %>% filter(contains == TRUE)
+  df
+  
+})
+  
+renderDataTable({
+  
+     datatable(df(),
+            options = list(
+              filter = "none",
+              scrollX = TRUE,
+              "pageLength" = 15,
+              columnDefs = list(list(targets='_all', class="dt-left"))))
+  
+})
+
+
+```
+
+### check file is read
+
+```{r}
+renderPrint({
+  
+  st_read(df()$file[as.numeric(input$map)]) 
+  
+})
+```
+
+#### check data is read
+
+```{r}
+map <- reactive({
+  
+    st_read(df()$file[as.numeric(input$map)]) %>%  
+    st_transform(crs =4326)
+  
+})
+
+renderPrint({
+  
+  map()
+  
+})
+```
+
+### check data type
+
+```{r}
+type <- reactive({
+  type <- st_geometry_type(map(), by_geometry = TRUE)[1]
+  type
+  
+})
+
+
+renderPrint({
+  type()
+  
+})
+```
+
+
+
+
+### map
+```{r}
+
+
+renderLeaflet({
+  if (type() == "MULTIPOLYGON" | type() == "POLYGON") {
+    leaflet() %>%
+      # add base maps
+      addProviderTiles("Esri.WorldImagery",
+                       # give the layer a name
+                       group = "World") %>%
+      addPolygons(
+        data = map(),
+        weight = 2,
+        fillOpacity = 0.1,
+        color = "orange"
+      )
+    
+  } else if (type() == "POINT" | type() == "MULTIPOINT") {
+    leaflet() %>%
+      addProviderTiles("Esri.WorldImagery",
+                       group = "World") %>%
+      addMarkers(data = map())
+    
+  } else {
+    leaflet() %>%
+      addProviderTiles("Esri.WorldImagery",
+                       group = "World") %>%
+      addPolylines(
+        data = map(),
+        weight = 1,
+        fillOpacity = 0.05,
+        color = "orange"
+      )
+  }
+  
+  
+})
+
+```
+
